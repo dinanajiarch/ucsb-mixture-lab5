@@ -1,4 +1,10 @@
-
+    library(MplusAutomation)
+    library(tidyverse)
+    library(reshape2)
+    library(cowplot)
+    library(glue)
+    library(data.table)
+    
 plot_lca_function <-
   function(model_name) {
     
