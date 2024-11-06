@@ -20,3 +20,5 @@ scatterplot3d
 reshape2
 DiagrammeR
 cowplot
+lubridate
+data.table

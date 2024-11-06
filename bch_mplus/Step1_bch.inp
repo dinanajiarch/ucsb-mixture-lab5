@@ -1,10 +1,11 @@
 TITLE:
 Step 1 - Three-Step - BCH Method
 DATA:
-FILE = "C:/Users/Dina Arch/Box/TA - ED 201/Labs/ucsb-mixture-lab5/manual_3step/Step1.dat";
- 
+FILE = "C:/Users/dnajiarch/Box/TA - ED 201/Labs/ucsb-mixture-lab5/bch_mplus/
+Step1.dat"; 
 VARIABLE:
-NAMES = enjoy useful logical job adult female math_irt; 
+NAMES = rand lsayid region urban gender mothed fathed raceth math_irt enjoy good
+     undrstnd nervous scared useful logical job adult female; 
  MISSING=.;
  categorical = enjoy-adult; 
    usevar = enjoy-adult;

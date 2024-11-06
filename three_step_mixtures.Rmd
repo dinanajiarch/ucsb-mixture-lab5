@@ -42,19 +42,16 @@ loadfonts()
 Load packages
 
 ```{r}
-library(naniar)
-library(tidyverse)
-library(haven)
-library(glue)
 library(MplusAutomation)
-library(rhdf5)
-library(here)
-library(janitor)
-library(gt)
+library(tidyverse) #collection of R packages designed for data science
+library(here) #helps with filepaths
+library(janitor) #clean_names
+library(gt) # create tables
+library(cowplot) # a ggplot theme
+library(DiagrammeR) # create path diagrams
+library(glue) # allows us to paste expressions into R code
+library(data.table) # used for `melt()` function  
 library(poLCA)
-library(reshape2)
-library(DiagrammeR)
-library(cowplot)
 here::i_am("three_step_mixtures.Rmd")
 ```
 
@@ -354,7 +351,7 @@ Parameterization using Reference Class 1
 
 ```{r, echo=FALSE, eval=TRUE, fig.align='center'}
 
-grViz(" digraph cfa_model {
+grViz(" digraph lca_model {
 
 # The `graph` statement - No editing needed
 
@@ -378,6 +375,7 @@ grViz(" digraph cfa_model {
     science -> {Enjoy Useful Logical Job Adult}
     science -> MathScore [minlen = 4];
     Female -> science [minlen = 4];
+    Female -> MathScore [minlen = 4];
     
  {rank = same; science; Female; MathScore}
  
@@ -415,15 +413,12 @@ tab_options(column_labels.font.weight = "bold", row_group.font.weight = "bold")
 
 ------------------------------------------------------------------------
 
-Load data
+The data can be found in the `data` folder and is called `lsay_subset.csv`.
 
-```{r, eval=TRUE}
-
-lsay_data <- read_csv(here("data", "lca_lsay_sci.csv"), na = c("9999", "9999.00")) %>%              
-  clean_names() %>%                                                                                 
-  dplyr::select(1:5, female, math_irt = mathg12,                                                               
-         enjoy = ab39m,useful = ab39t,                                                             
-         logical = ab39u, job = ab39w, adult = ab39x)                                               
+```{r}
+lsay_data <- read_csv(here("data","lsay_subset.csv")) %>% 
+  clean_names() %>%   # make variable names lowercase
+  mutate(female = recode(gender, `1` = 0, `2` = 1)) # relabel values from 1,2 to 0,1
 
 ```
 
@@ -437,13 +432,16 @@ lsay_data <- read_csv(here("data", "lca_lsay_sci.csv"), na = c("9999", "9999.00"
 
 ------------------------------------------------------------------------
 
-```{r, cache =TRUE}
+This step is done after class enumeration (or after you have selected the best latent class model). In this example, the four class model was the best. Now, I am re-estimating the four-class model using `optseed` for efficiency. The difference here is the `SAVEDATA` command, where I can save the posterior probabilities and the modal class assignment for steps two and three. 
+
+
+```{r, eval = FALSE}
 
 step1  <- mplusObject(
   TITLE = "Step 1 - Three-Step using LSAL", 
   VARIABLE = 
-  "categorical = enjoy-adult; 
-   usevar = enjoy-adult;
+  "categorical = enjoy useful logical job adult; 
+   usevar = enjoy useful logical job adult;
     
    classes = c(4); 
     
@@ -454,13 +452,14 @@ step1  <- mplusObject(
   ANALYSIS = 
    "estimator = mlr; 
     type = mixture;
-    starts = 500 100;",
+    starts = 0;
+    optseed = 568405;",
   
   SAVEDATA = 
    "File=3step_savedata.dat;
     Save=cprob;",
   
-  OUTPUT = "sampstat residual tech11 tech14",
+  OUTPUT = "residual tech11 tech14",
   
   PLOT = 
     "type = plot3; 
@@ -471,7 +470,7 @@ step1  <- mplusObject(
 
 step1_fit <- mplusModeler(step1,
                             dataout=here("manual_3step", "Step1.dat"),
-                            modelout=here("manual_3step", "Step1_LSAY.inp") ,
+                            modelout=here("manual_3step", "one.inp") ,
                             check=TRUE, run = TRUE, hashfilename = FALSE)
 ```
 
@@ -479,10 +478,10 @@ step1_fit <- mplusModeler(step1,
 
 
 ```{r, fig.height=6, fig.width=10}
-source("plot_lca_function.txt")
-output_lsay <- readModels(here("manual_3step","step1_lsay.out"))
+source("plot_lca.txt")
+output_lsay <- readModels(here("manual_3step","one.out"))
 
-plot_lca_function(model_name = output_lsay)
+plot_lca(model_name = output_lsay)
 ```
 
 ------------------------------------------------------------------------
@@ -495,8 +494,7 @@ Extract logits for the classification probabilities for the most likely latent c
 
 ```{r}
 
-logit_cprobs <- as.data.frame(step1_fit[["results"]]
-                                       [["class_counts"]]
+logit_cprobs <- as.data.frame(output_lsay[["class_counts"]]
                                        [["logitProbs.mostLikely"]])
 ```
 
@@ -504,8 +502,7 @@ Extract saved dataset which is part of the mplusObject "step1_fit"
 
 ```{r}
 
-savedata <- as.data.frame(step1_fit[["results"]]
-                                   [["savedata"]])
+savedata <- as.data.frame(output_lsay[["savedata"]])
 ```
 
 Rename the column in savedata named "C" and change to "N"
@@ -532,7 +529,7 @@ step3  <- mplusObject(
   VARIABLE = 
  "nominal=N;
   usevar = n;
-  missing are all (999);
+  
   classes = c(4);
   
   usevar = female math_irt;" ,
@@ -541,12 +538,16 @@ step3  <- mplusObject(
  "estimator = mlr; 
   type = mixture; 
   starts = 0;",
+ 
+  DEFINE = 
+   "center female (grandmean);",
   
   MODEL =
   glue(
  " %OVERALL%
-  
-  C on female;      ! covariate as predictor of C
+ 
+  math_irt on female; ! covariate as a predictor of the distal outcome
+  C on female;        ! covariate as predictor of C
 
      %C#1%
   [n#1@{logit_cprobs[1,1]}]; ! MUST EDIT if you do not have a 4-class model. 
@@ -591,7 +592,7 @@ step3  <- mplusObject(
     diff24 = m2-m4;
     diff34 = m3-m4;",
   
-  MODELTEST = "     ! omnibus test of distal means
+  MODELTEST = "     ! omnibus test of distal means 
     m1=m2;
     m2=m3;
     m3=m4;",
@@ -601,17 +602,55 @@ step3  <- mplusObject(
 
 step3_fit <- mplusModeler(step3,
                dataout=here("manual_3step", "Step3.dat"), 
-               modelout=here("manual_3step", "Step3_LSAY.inp"), 
+               modelout=here("manual_3step", "three_starts.inp"), 
                check=TRUE, run = TRUE, hashfilename = FALSE)
 ```
 
 ------------------------------------------------------------------------
 
-### Table of Distal Outcome Differences
+#### Wald Test Table
 
 ```{r}
-modelParams <- readModels(here("manual_3step", "Step3_LSAY.out"))
+modelParams <- readModels(here("manual_3step", "three.out"))
 
+# Extract information as data frame
+wald <- as.data.frame(modelParams[["summaries"]]) %>%
+  dplyr::select(WaldChiSq_Value:WaldChiSq_PValue) %>% 
+  mutate(WaldChiSq_DF = paste0("(", WaldChiSq_DF, ")")) %>% 
+  unite(wald_test, WaldChiSq_Value, WaldChiSq_DF, sep = " ") %>% 
+  rename(pval = WaldChiSq_PValue) %>% 
+  mutate(pval = ifelse(pval<0.001, paste0("<.001*"),
+                       ifelse(pval<0.05, paste0(scales::number(pval, accuracy = .001), "*"),
+                              scales::number(pval, accuracy = .001))))
+
+# Create table
+
+wald_table <- wald %>% 
+  gt() %>%
+    tab_header(
+    title = "Wald Test of Paramter Constraints (Math)") %>%
+    cols_label(
+      wald_test = md("Wald Test (*df*)"),
+      pval = md("*p*-value")) %>% 
+  cols_align(align = "center") %>% 
+  opt_align_table_header(align = "left") %>% 
+  gt::tab_options(table.font.names = "serif")
+
+wald_table
+```
+
+Save figure
+
+```{r}
+gtsave(wald_table, here("figures","wald_table.docx"))
+```
+
+
+------------------------------------------------------------------------
+
+#### Table of Distal Outcome Differences
+
+```{r}
 # Extract information as data frame
 diff <- as.data.frame(modelParams[["parameters"]][["unstandardized"]]) %>%
   filter(grepl("DIFF", param)) %>% 
@@ -622,7 +661,10 @@ diff <- as.data.frame(modelParams[["parameters"]][["unstandardized"]]) %>%
          param = as.numeric(param)) %>% 
   separate(param, into = paste0("Group", 1:2), sep = 1) %>% 
   mutate(class = paste0("Class ", Group1, " vs ", Group2)) %>% 
-  select(class, estimate, pval)
+  select(class, estimate, pval) %>% 
+  mutate(pval = ifelse(pval<0.001, paste0("<.001*"),
+                       ifelse(pval<0.05, paste0(scales::number(pval, accuracy = .001), "*"),
+                              scales::number(pval, accuracy = .001))))
 
 # Create table
 
@@ -636,11 +678,6 @@ diff %>%
       pval = md("*p*-value")) %>% 
     sub_missing(1:3,
               missing_text = "") %>%
-  fmt(3,
-    fns = function(x)
-      ifelse(x<0.05, paste0(scales::number(x, accuracy = .001), "*"),
-             scales::number(x, accuracy = .001))
-  ) %>%  
   cols_align(align = "center") %>% 
   opt_align_table_header(align = "left") %>% 
   gt::tab_options(table.font.names = "serif")
@@ -648,11 +685,9 @@ diff %>%
 
 ------------------------------------------------------------------------
 
-### Plot Distal Outcome
+#### Plot Distal Outcome
 
 ```{r}
-modelParams <- readModels(here("manual_3step", "Step3_LSAY.out"))
-
 # Extract class size 
 c_size <- as.data.frame(modelParams[["class_counts"]][["modelEstimated"]][["proportion"]]) %>% 
   rename("cs" = 1) %>% 
@@ -663,16 +698,16 @@ c_size_val <- paste0("C", 1:nrow(c_size), glue(" ({c_size[1:nrow(c_size),]}%)"))
 
 # Extract information as data frame
 estimates <- as.data.frame(modelParams[["parameters"]][["unstandardized"]]) %>%
-  filter(paramHeader == "Means") %>%
+  filter(paramHeader == "Intercepts") %>%
   dplyr::select(param, est, se) %>% 
   filter(param == "MATH_IRT") %>% 
   mutate(across(c(est, se), as.numeric)) %>% 
   mutate(LatentClass = c_size_val)
 
-
 # Add labels (NOTE: You must change the labels to match the significance testing!!) 
-value_labels <- paste0(estimates$est, c(" a"," b"," ab"," b"))
+#value_labels <- paste0(estimates$est, c("a"," bc"," abd"," cd"))
 
+estimates$LatentClass <- fct_inorder(estimates$LatentClass)
 
 # Plot bar graphs
 estimates %>%
@@ -682,77 +717,59 @@ estimates %>%
                 size=.3,    # Thinner lines
                 width=.2,
                 position=position_dodge(.9)) +
-  geom_text(aes(y = est, label = value_labels), 
-            family = "serif", size =4,
+  geom_text(aes(label = est), 
+            family = "serif", size = 4,
             position=position_dodge(.9),
-            vjust = 8,) +
-  scale_fill_grey(start = .4, end = .7) +
-  labs(y="Math Score") +
+            vjust = 8) +  
+ # scale_fill_grey(start = .4, end = .7) + # Remove for colorful bars
+  labs(y="Math Scores", x="") +
   theme_cowplot() +
-  theme(text = element_text(family = "serif", size = 12),
-        axis.text.x = element_text(size=10),
-        legend.position="none") +
-  coord_cartesian(ylim=c(0,80),  # Change ylim based on distal outcome range
-                  expand = FALSE) 
-
+  theme(text = element_text(family = "serif", size = 15),
+        axis.text.x = element_text(size=15),
+        legend.position="none")
 
 # Save plot
 ggsave(here("figures","ManualDistal_Plot.jpeg"),              
        dpi=300, width=10, height = 7, units="in") 
 ```
 
-
 ------------------------------------------------------------------------
+ 
+#### D on X
 
-### Regression slopes, odds ratios, simple slopes
+Is there a relation between the distal outcome (Math IRT Scores) and the covariate (Gender)?
 
-```{r, eval = FALSE}
-MODEL RESULTS
+```{r}
+# Extract information as data frame
+cov <- as.data.frame(modelParams[["parameters"]][["unstandardized"]]) %>%
+  filter(param == "FEMALE") %>% 
+  mutate(param = str_replace(param, "FEMALE", "Gender"))%>% 
+  mutate(LatentClass = sub("^","Class ", LatentClass)) %>%  
+  dplyr::select(!paramHeader) %>% 
+  mutate(se = paste0("(", format(round(se,2), nsmall =2), ")")) %>% 
+    unite(estimate, est, se, sep = " ") %>% 
+  select(param, estimate, pval) %>% 
+  distinct(param, .keep_all=TRUE) %>% 
+  mutate(pval = ifelse(pval<0.001, paste0("<.001*"),
+                       ifelse(pval<0.05, paste0(scales::number(pval, accuracy = .001), "*"),
+                              scales::number(pval, accuracy = .001))))
 
-                                                    Two-Tailed
-                    Estimate       S.E.  Est./S.E.    P-Value
-                    
-Categorical Latent Variables
 
- C#1        ON
-    FEMALE            -0.862      0.121     -7.156      0.000
+# Create table
 
- C#2        ON
-    FEMALE            -0.569      0.145     -3.919      0.000
-
- C#3        ON
-    FEMALE            -0.603      0.134     -4.502      0.000
-
- Intercepts
-    C#1                0.427      0.087      4.919      0.000
-    C#2                0.246      0.109      2.260      0.024
-    C#3                0.027      0.099      0.277      0.782
-
-New/Additional Parameters
-    DIFF12             6.398      1.826      3.503      0.000
-    DIFF13             4.261      2.228      1.912      0.056
-    DIFF23            -2.137      1.783     -1.198      0.231
-    DIFF14             3.732      1.619      2.305      0.021
-    DIFF24            -2.666      2.078     -1.283      0.200
-    DIFF34            -0.529      1.908     -0.277      0.782
-    
-
-LOGISTIC REGRESSION ODDS RATIO RESULTS
-
-                                                95% C.I.
-                    Estimate       S.E.  Lower 2.5% Upper 2.5%
-
-Categorical Latent Variables
-
- C#1      ON
-    FEMALE             0.422      0.051      0.333      0.535
-
- C#2      ON
-    FEMALE             0.566      0.082      0.426      0.753
-
- C#3      ON
-    FEMALE             0.547      0.073      0.421      0.711
-
+cov %>% 
+  gt(groupname_col = "LatentClass", rowname_col = "param") %>%
+  tab_header(
+    title = "Gender Predicting Math Scores") %>%
+  cols_label(
+    estimate = md("Estimate (*se*)"),
+    pval = md("*p*-value")) %>% 
+  sub_missing(1:3,
+              missing_text = "") %>%
+  sub_values(values = c("999.000"), replacement = "-") %>% 
+  cols_align(align = "center") %>% 
+  opt_align_table_header(align = "left") %>% 
+  gt::tab_options(table.font.names = "serif")
 ```
 
 ------------------------------------------------------------------------
@@ -799,8 +816,8 @@ step1_bch  <- mplusObject(
   rdata = lsay_data)
 
 step1_fit_bch <- mplusModeler(step1_bch,
-                            dataout=here("manual_3step", "Step1.dat"),
-                            modelout=here("manual_3step", "Step1_bch.inp") ,
+                            dataout=here("bch_mplus", "Step1.dat"),
+                            modelout=here("bch_mplus", "Step1_bch.inp") ,
                             check=TRUE, run = TRUE, hashfilename = FALSE)
 ```
 
@@ -833,7 +850,7 @@ colnames(savedata)[colnames(savedata)=="C"] <- "N"
 
 ------------------------------------------------------------------------
 
-Model with 1 covariate and 1 distal outcome
+You'll see in the output that this model had trouble with convergence. This is common when applying the BCH method and another reason why we prefer to use ML three-step. 
 
 ```{r, cache = TRUE}
 step3_bch  <- mplusObject(
@@ -842,7 +859,6 @@ step3_bch  <- mplusObject(
   VARIABLE = 
  "nominal=N;
   usevar = n;
-  missing are all (999);
   classes = c(4);
   
   usevar = BCHW1-BCHW4 female math_irt;
@@ -858,6 +874,7 @@ step3_bch  <- mplusObject(
   glue(
  " %OVERALL%
   
+   math_irt on female; ! covariate as a predictor of the distal outcome
   C on female;      ! covariate as predictor of C
 
   %C#1%
@@ -900,8 +917,8 @@ step3_bch  <- mplusObject(
   rdata = savedata)
 
 step3_fit_bch <- mplusModeler(step3_bch,
-               dataout=here("manual_3step", "Step3.dat"), 
-               modelout=here("manual_3step", "Step3_bch.inp"), 
+               dataout=here("bch_mplus", "Step3.dat"), 
+               modelout=here("bch_mplus", "Step3_bch.inp"), 
                check=TRUE, run = TRUE, hashfilename = FALSE)
 ```
 
@@ -911,14 +928,33 @@ step3_fit_bch <- mplusModeler(step3_bch,
 
 ------------------------------------------------------------------------
 
+Read in data from Step 1 of ML Method
+
+```{r}
+# Read in model with SAVEDATA information
+output_lsay <- readModels(here("manual_3step","one.out"))
+
+#Extract logits for the classification probabilities for the most likely latent class
+logit_cprobs <- as.data.frame(output_lsay[["class_counts"]]
+                                       [["logitProbs.mostLikely"]])
+# Read in savedata
+savedata <- as.data.frame(output_lsay[["savedata"]])
+
+#Rename the column in savedata named "C" and change to "N"
+colnames(savedata)[colnames(savedata)=="C"] <- "N"
+```
+
+
+Step 3: LCA Moderation
+
 ```{r, cache = TRUE}
 step3mod  <- mplusObject(
-  TITLE = "Step3 - 3step LSAY - Lab9", 
+  TITLE = "LCA Moderation", 
   
   VARIABLE = 
  "nominal=N;
   usevar = n;
-  missing are all (999);
+
   classes = c(4);
   
   usevar = female math_irt;" ,
@@ -927,7 +963,7 @@ step3mod  <- mplusObject(
  "estimator = mlr; 
   type = mixture; 
   starts = 0;",
-  
+ 
   MODEL =
   glue(
  "!DISTAL = math_irt, COVARIATE = female, MODERATOR = C
@@ -1002,8 +1038,8 @@ step3mod  <- mplusObject(
   rdata = savedata)
 
 step3mod_fit <- mplusModeler(step3mod,
-               dataout=here("manual_3step", "mod.dat"), 
-               modelout=here("manual_3step", "Step3_mod_LSAY.inp"), 
+               dataout=here("lca_mod", "mod.dat"), 
+               modelout=here("lca_mod", "Step3_mod_LSAY.inp"), 
                check=TRUE, run = TRUE, hashfilename = FALSE)
 ```
 
@@ -1012,7 +1048,7 @@ step3mod_fit <- mplusModeler(step3mod,
 ### Table of Distal Outcome Differences
 
 ```{r}
-modelParams <- readModels(here("manual_3step", "Step3_mod_LSAY.out"))
+modelParams <- readModels(here("lca_mod", "Step3_mod_LSAY.out"))
 
 # Extract information as data frame
 diff <- as.data.frame(modelParams[["parameters"]][["unstandardized"]]) %>%
@@ -1054,6 +1090,8 @@ diff %>%
 
 ### Plot Distal Outcome
 
+This is the intercept plotted across class. Here, the intercept is the expected value of math IRT scores when the predictor, `female`, is zero (and in this case 0 equals male)
+
 ```{r}
 
 # Extract class size 
@@ -1072,9 +1110,6 @@ estimates <- as.data.frame(modelParams[["parameters"]][["unstandardized"]]) %>%
   mutate(across(c(est, se), as.numeric)) %>% 
   mutate(LatentClass = c_size_val)
 
-# Add labels (NOTE: You must change the labels to match the significance testing!!) 
-value_labels <- paste0(estimates$est, c(" a"," bc"," abd"," cd"))
-
 # Plot bar graphs
 estimates %>%
   ggplot(aes(x=LatentClass, y = est, fill = LatentClass)) +
@@ -1083,11 +1118,11 @@ estimates %>%
                 size=.3,    # Thinner lines
                 width=.2,
                 position=position_dodge(.9)) +
-  geom_text(aes(y = est, label = value_labels), 
-            family = "serif", size =4,
+  geom_text(aes(label = est), 
+            family = "serif", size = 4,
             position=position_dodge(.9),
-            vjust = 8,) +
-  scale_fill_grey(start = .4, end = .7) +
+            vjust = 8) +  
+  #scale_fill_grey(start = .4, end = .7) +
   labs(y="Math Score", x="") +
   theme_cowplot() +
   theme(text = element_text(family = "serif", size = 12),
@@ -1097,7 +1132,6 @@ estimates %>%
                   expand = FALSE) 
 
 
-
 # Save plot
 ggsave(here("figures","Moderation_Distal.jpeg"),              
        dpi=300, width=10, height = 7, units="in") 
@@ -1105,7 +1139,78 @@ ggsave(here("figures","Moderation_Distal.jpeg"),
 
 ------------------------------------------------------------------------
 
-### Plot Slopes
+### Plot Interaction 
+
+#### Bar plot
+
+```{r}
+# Extract information as data frame
+desc <- as.data.frame(modelParams$sampstat$univariate.sample.statistics) %>% 
+  rownames_to_column("Variables")
+
+# Select min amd max values of covariate
+xmin <- desc %>% 
+  filter(Variables == "FEMALE") %>% 
+  dplyr::select(Minimum) %>% 
+  as.numeric()
+xmax <- desc %>% 
+  filter(Variables == "FEMALE") %>% 
+  dplyr::select(Maximum) %>% 
+  as.numeric()
+
+# Add slope and intercept, Min and Max values 
+line <- as.data.frame(modelParams$parameters$unstandardized) %>% 
+  filter(str_detect(paramHeader, 'ON|Inter')) %>% 
+  unite("param", paramHeader:param, remove = TRUE) %>% 
+  mutate(param = replace(param,agrep(".ON",param),"slope"),
+         param = replace(param,agrep("Inter", param), "intercept"),
+         LatentClass = factor(LatentClass, labels = c_size_val)) %>% 
+  dplyr::select(param, est, LatentClass) %>% 
+  pivot_wider(names_from = param, values_from = est) %>%  
+  add_column(x_max = xmax,
+         x_min = xmin)
+
+
+# Add column with y values
+data <- line %>% 
+  mutate(y_min = (slope*xmin) + intercept,
+         y_max = (slope*xmax) + intercept) %>% 
+  dplyr::select(-slope, -intercept) %>% 
+  pivot_longer(-LatentClass, 
+               names_to = c("xvalues", "yvalues"), 
+               names_sep="_" ) %>% 
+  pivot_wider(names_from = xvalues, values_from = value) %>% 
+  dplyr::select(-yvalues) %>% 
+  mutate(x = case_when(
+           x == 1 ~ "Female",
+           x == 0 ~ "Male"))
+  
+# Plot bar graphs
+data %>%
+  ggplot(aes(x=factor(x), y = y, fill = LatentClass)) +
+  geom_col(position = "dodge", stat = "identity", color = "black") +
+  geom_text(aes(label = y), 
+            family = "serif", size = 4,
+            position=position_dodge(.9),
+            vjust = -.5) +  
+  #scale_fill_grey(start = .4, end = .7) +
+  labs(y="Math Score", x="") +
+  theme_cowplot() +
+  theme(text = element_text(family = "serif", size = 12),
+        axis.text.x = element_text(size=12)) +
+  coord_cartesian(ylim=c(0,80),  # Change ylim based on distal outcome range
+                  expand = FALSE) 
+
+# Save plot
+ggsave(here("figures","Moderation_Interaction.jpeg"),              
+       dpi=300, width=10, height = 7, units="in") 
+```
+
+------------------------------------------------------------------------
+
+#### Line plot
+
+Here we can visualize the slopes. 
 
 ```{r}
 # Minimum and Maximum Values
@@ -1163,7 +1268,7 @@ data %>%
   geom_line(aes(group = LatentClass), size = 1) +
   labs(x = "",
        y = "Math Score") +
-  scale_colour_grey(start = .3, end = .6) +
+  #scale_colour_grey(start = .3, end = .6) +
   theme_cowplot() +
   theme(
     text = element_text(family = "serif", size = 12),
@@ -1178,6 +1283,8 @@ ggsave(here("figures","Moderation_Slope.jpeg"),             #
        dpi=500, width=10, height = 7, units="in")   
 
 ```
+
+It's also important to report the slope coefficients. Which ones would you assume are significant based on the plots?
 
 ------------------------------------------------------------------------
 

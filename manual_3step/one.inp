@@ -1,13 +1,14 @@
 TITLE:
 Step 1 - Three-Step using LSAL
 DATA:
-FILE = "C:/Users/Dina Arch/Box/TA - ED 201/Labs/ucsb-mixture-lab5/manual_3step/Step1.dat";
- 
+FILE = "C:/Users/dnajiarch/Box/TA - ED 201/Labs/ucsb-mixture-lab5/
+manual_3step/Step1.dat"; 
 VARIABLE:
-NAMES = enjoy useful logical job adult female math_irt; 
+NAMES = rand lsayid region urban gender mothed fathed raceth math_irt enjoy good
+     undrstnd nervous scared useful logical job adult female; 
  MISSING=.;
- categorical = enjoy-adult; 
-   usevar = enjoy-adult;
+ categorical = enjoy useful logical job adult; 
+   usevar = enjoy useful logical job adult;
     
    classes = c(4); 
     
@@ -17,9 +18,10 @@ NAMES = enjoy useful logical job adult female math_irt;
 ANALYSIS:
 estimator = mlr; 
     type = mixture;
-    starts = 500 100;
+    starts = 0;
+    optseed = 568405;
 OUTPUT:
-sampstat residual tech11 tech14
+residual tech11 tech14
 SAVEDATA:
 File=3step_savedata.dat;
     Save=cprob;
